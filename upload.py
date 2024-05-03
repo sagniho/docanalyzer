@@ -13,11 +13,11 @@ def main():
 
     # In the first column, display the logo
     with col1:
-        st.image('malt.png', width=150)  # Adjust the width as needed
+        st.image('lock.png', width=150)  # Adjust the width as needed
 
     # In the second column, display the title and subtitle
     with col2:
-        st.markdown("<h2 style='margin-top: 0;padding-left: 10px;'>McKund AI</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='margin-top: 0;padding-left: 10px;'>Secure Doc Analyzer</h2>", unsafe_allow_html=True)
         st.markdown("<em><p style='margin-top: 0; padding-left: 10px;'>Intelligent insights into your documents.</p></em>", unsafe_allow_html=True)
 
     # Information box with AI assistant capabilities

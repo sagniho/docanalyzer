@@ -3,7 +3,7 @@ import openai
 
 # Initialize the OpenAI client
 client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-ASSISTANT_ID = st.secrets["McKund"]
+ASSISTANT_ID = st.secrets["ASST"]
 
 def main():
     st.title('Interactive Document Analyzer')

@@ -1,88 +1,101 @@
 import streamlit as st
-import openai
+from openai import OpenAI
+import time
 
-# Initialize the OpenAI client
-client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 ASSISTANT_ID = st.secrets["ASST"]
 
-def main():
-    st.title('Interactive Document Analyzer')
+# Create columns for the logo and the title
+col1, col2 = st.columns([1, 4])
 
-    # Create columns for the logo and the title
-    col1, col2 = st.columns([1, 4])
+# In the first column, display the logo
+with col1:
+    st.image('lock.png', width=100)  # Adjust the width as needed
 
-    # In the first column, display the logo
-    with col1:
-        st.image('lock.png', width=150)  # Adjust the width as needed
+# In the second column, display the title and subtitle
+with col2:
+    st.markdown("<h2 style='margin-top: 0;padding-left: 10px;'>Secure Doc Analyzer</h2>", unsafe_allow_html=True)
+    st.markdown("<em><p style='margin-top: 0; padding-left: 10px;'>Intelligent insights into your documents.</p></em>", unsafe_allow_html=True)
 
-    # In the second column, display the title and subtitle
-    with col2:
-        st.markdown("<h2 style='margin-top: 0;padding-left: 10px;'>Secure Doc Analyzer</h2>", unsafe_allow_html=True)
-        st.markdown("<em><p style='margin-top: 0; padding-left: 10px;'>Intelligent insights into your documents.</p></em>", unsafe_allow_html=True)
+# Information box with AI assistant capabilities and knowledge base
+info_text = """
+Powered by GPT-4, this assistant helps you analyze documents.
+Upload your files, and ask questions directly about the content.
+"""
 
-    # Information box with AI assistant capabilities
-    st.info("Powered by GPT-4, this assistant helps you analyze documents. Upload your files, and ask questions directly about the content.", icon="ℹ️")
 
-    # File upload and processing
-    uploaded_file = st.file_uploader("Upload document(s). Must be a pdf, docx, or txt file.", type=['pdf', 'txt', 'docx'])
-    document_content = ""
-    if uploaded_file is not None:
-        document_content = uploaded_file.getvalue().decode('utf-8')  # Simplified assumption
+st.info(info_text, icon="ℹ️")
 
-    # Initialize the thread in session state if not present
+
+uploaded_file = st.file_uploader("Upload document(s). Must be a pdf, docx, or txt file.", type=['pdf', 'txt', 'docx'])
+
+def send_message_get_response(assistant_id, user_message, file_id=None):
     if 'thread' not in st.session_state:
-        st.session_state['thread'] = client.Thread.create().id
+        st.session_state['thread'] = client.beta.threads.create().id
 
-    # Initialize messages in session state if not present
+    thread_id = st.session_state['thread']
+
+    message = {
+        "role": "user",
+        "content": user_message
+    }
+
+    if file_id:
+        message["attachments"] = [{"file_id": file_id, "tools": [{"type": "file_search"}]}]
+
+    client.beta.threads.messages.create(thread_id=thread_id, **message)
+
+    run = client.beta.threads.runs.create_and_poll(
+        thread_id=thread_id,
+        assistant_id=assistant_id
+    )
+
+    messages = list(client.beta.threads.messages.list(thread_id=thread_id, run_id=run.id))
+    message_content = messages[0].content[0].text
+    annotations = message_content.annotations
+    citations = []
+
+    for index, annotation in enumerate(annotations):
+        message_content.value = message_content.value.replace(annotation.text, f"[{index}]")
+        if file_citation := getattr(annotation, "file_citation", None):
+            cited_file = client.files.retrieve(file_citation.file_id)
+            citations.append(f"[{index}] {cited_file.filename}")
+
+    return message_content.value, "\n".join(citations)
+
+def main():
     if 'messages' not in st.session_state:
         st.session_state['messages'] = []
 
-    # Display previous chat messages
-    for msg in st.session_state['messages']:
-        role, content = msg['role'], msg['content']
-        if role == 'user':
-            with st.chat_message("You", avatar="🧑‍💻"):
-                st.write(content)
+    for msg in st.session_state.messages:
+        if msg['role'] == 'user':
+            with st.chat_message("user", avatar="🧑‍💻"):
+                st.write(msg["content"])
         else:
-            with st.chat_message("AI Assistant", avatar="🤖"):
-                st.write(content)
+            with st.chat_message("assistant", avatar="🤖"):
+                st.write(msg["content"])
+                if msg["citations"]:
+                    st.write(msg["citations"])
 
-    # Chat input for new message
-    user_input = st.text_input("Ask your question about the document here...", key="chat_input")
+    user_input = st.chat_input(placeholder="Please ask me your question…")
 
-    # When a message is sent through the chat input
-    if st.button("Send"):
-        # Append the user message to the session state
+    if user_input:
         st.session_state['messages'].append({'role': 'user', 'content': user_input})
+        with st.chat_message("user", avatar="🧑‍💻"):
+            st.write(user_input)
 
-        # Get the response from the assistant
-        with st.spinner('Analyzing your document...'):
-            response = send_message_get_response(ASSISTANT_ID, user_input, document_content)
-            # Append the response to the session state
-            st.session_state['messages'].append({'role': 'assistant', 'content': response})
-            # Display the assistant's response
-            with st.chat_message("AI Assistant", avatar="🤖"):
+        with st.spinner('Working on this for you now...'):
+            if uploaded_file:
+                message_file = client.files.create(file=uploaded_file, purpose="assistants")
+                response, citations = send_message_get_response(ASSISTANT_ID, user_input, message_file.id)
+            else:
+                response, citations = send_message_get_response(ASSISTANT_ID, user_input)
+
+            st.session_state['messages'].append({'role': 'assistant', 'content': response, 'citations': citations})
+            with st.chat_message("assistant", avatar="🤖"):
                 st.write(response)
-
-def send_message_get_response(assistant_id, user_message, document_content):
-    thread_id = st.session_state['thread']
-
-    # Add user message to the thread with document content as context
-    message = client.ThreadMessage.create(
-        thread_id=thread_id,
-        assistant_id=assistant_id,
-        messages=[
-            {"role": "system", "content": f"Document content: {document_content[:500]}..."},  # Provide initial part of document as context
-            {"role": "user", "content": user_message}
-        ]
-    )
-
-    # Poll for the response
-    while True:
-        time.sleep(1)  # Delay to prevent over-polling
-        response = client.ThreadMessage.list(thread_id=thread_id)
-        if response.data[-1].role == "assistant":
-            return response.data[-1].content
+                if citations:
+                    st.write(citations)
 
 if __name__ == "__main__":
     main()
